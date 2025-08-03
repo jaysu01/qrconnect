@@ -1,76 +1,178 @@
 package com.mobdeve.s17.dayrit.jason.qrconnect
 
 import android.content.Context
-import android.database.sqlite.SQLiteDatabase
-import android.database.sqlite.SQLiteOpenHelper
+import androidx.room.*
+import androidx.sqlite.db.SupportSQLiteDatabase
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
-class QRDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
+// entity class for room
+@Entity(tableName = "qr_history")
+data class QRHistoryEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Int = 0,
+    @ColumnInfo(name = "type")
+    val type: String,
+    @ColumnInfo(name = "content")
+    val content: String,
+    @ColumnInfo(name = "timestamp")
+    val timestamp: String
+)
+
+// dao interface for room operations
+@Dao
+interface QRHistoryDao {
+    @Query("SELECT * FROM qr_history ORDER BY id DESC")
+    suspend fun getAllHistory(): List<QRHistoryEntity>
+
+    @Insert
+    suspend fun insertHistory(history: QRHistoryEntity)
+
+    @Query("DELETE FROM qr_history WHERE id = :id")
+    suspend fun deleteHistoryById(id: Int)
+
+    @Query("DELETE FROM qr_history")
+    suspend fun clearAllHistory()
+}
+
+// room database
+@Database(
+    entities = [QRHistoryEntity::class],
+    version = 1,
+    exportSchema = false
+)
+abstract class QRDatabase : RoomDatabase() {
+    abstract fun historyDao(): QRHistoryDao
 
     companion object {
-        private const val DATABASE_NAME = "qr_history.db"
-        private const val DATABASE_VERSION = 1
+        @Volatile
+        private var INSTANCE: QRDatabase? = null
+
+        fun getDatabase(context: Context): QRDatabase {
+            return INSTANCE ?: synchronized(this) {
+                val instance = Room.databaseBuilder(
+                    context.applicationContext,
+                    QRDatabase::class.java,
+                    "qr_history.db"
+                )
+                    .addCallback(object : RoomDatabase.Callback() {
+                        override fun onCreate(db: SupportSQLiteDatabase) {
+                            super.onCreate(db)
+                            // database is created
+                        }
+                    })
+                    .fallbackToDestructiveMigration() // for simplicity
+                    .build()
+                INSTANCE = instance
+                instance
+            }
+        }
+    }
+}
+
+// updated helper class that maintains existing interface but uses room internally
+class QRDatabaseHelper(private val context: Context) {
+    private val database = QRDatabase.getDatabase(context)
+    private val dao = database.historyDao()
+    private val coroutineScope = CoroutineScope(Dispatchers.IO)
+
+    // convert QRHistoryEntity to HistoryItem for backward compatibility
+    private fun QRHistoryEntity.toHistoryItem() = HistoryItem(
+        id = this.id,
+        type = this.type,
+        content = this.content,
+        timestamp = this.timestamp
+    )
+
+    // method to insert history data
+    fun insertHistory(type: String, content: String, timestamp: String) {
+        coroutineScope.launch {
+            try {
+                dao.insertHistory(
+                    QRHistoryEntity(
+                        type = type,
+                        content = content,
+                        timestamp = timestamp
+                    )
+                )
+            } catch (e: Exception) {
+                // handle error silently to maintain compatibility
+            }
+        }
+    }
+
+    // method to fetch all history records
+    fun getAllHistory(): List<HistoryItem> {
+        return try {
+            runBlocking {
+                dao.getAllHistory().map { it.toHistoryItem() }
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    // method to delete a specific history entry
+    fun deleteHistory(id: Int) {
+        coroutineScope.launch {
+            try {
+                dao.deleteHistoryById(id)
+            } catch (e: Exception) {
+                // handle error silently to maintain compatibility
+            }
+        }
+    }
+
+    // method to clear all history
+    fun clearAllHistory() {
+        coroutineScope.launch {
+            try {
+                dao.clearAllHistory()
+            } catch (e: Exception) {
+                // handle error silently to maintain compatibility
+            }
+        }
+    }
+
+    // new methods for better coroutine support
+    suspend fun insertHistoryAsync(type: String, content: String, timestamp: String) {
+        dao.insertHistory(
+            QRHistoryEntity(
+                type = type,
+                content = content,
+                timestamp = timestamp
+            )
+        )
+    }
+
+    suspend fun getAllHistoryAsync(): List<HistoryItem> {
+        return dao.getAllHistory().map { it.toHistoryItem() }
+    }
+
+    suspend fun deleteHistoryAsync(id: Int) {
+        dao.deleteHistoryById(id)
+    }
+
+    suspend fun clearAllHistoryAsync() {
+        dao.clearAllHistory()
+    }
+
+    // cleanup method
+    fun close() {
+        // room handles connection management automatically
+        // this method is kept for interface compatibility
+    }
+
+    companion object {
+        // constants maintained for backward compatibility
+        const val DATABASE_NAME = "qr_history.db"
+        const val DATABASE_VERSION = 1
         const val TABLE_NAME = "qr_history"
         const val COLUMN_ID = "id"
         const val COLUMN_TYPE = "type"
         const val COLUMN_CONTENT = "content"
         const val COLUMN_TIMESTAMP = "timestamp"
-    }
-
-    override fun onCreate(db: SQLiteDatabase) {
-        val createTableQuery = """
-            CREATE TABLE $TABLE_NAME (
-                $COLUMN_ID INTEGER PRIMARY KEY AUTOINCREMENT,
-                $COLUMN_TYPE TEXT,
-                $COLUMN_CONTENT TEXT,
-                $COLUMN_TIMESTAMP TEXT
-            )
-        """
-        db.execSQL(createTableQuery)
-    }
-
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        db.execSQL("DROP TABLE IF EXISTS $TABLE_NAME")
-        onCreate(db)
-    }
-
-    // Method to insert history data
-    fun insertHistory(type: String, content: String, timestamp: String) {
-        val db = writableDatabase
-        val query = "INSERT INTO $TABLE_NAME ($COLUMN_TYPE, $COLUMN_CONTENT, $COLUMN_TIMESTAMP) VALUES (?, ?, ?)"
-        db.execSQL(query, arrayOf(type, content, timestamp))
-        db.close()
-    }
-
-    // Method to fetch all history records
-    fun getAllHistory(): List<HistoryItem> {
-        val db = readableDatabase
-        val cursor = db.rawQuery("SELECT * FROM $TABLE_NAME", null)
-        val historyList = mutableListOf<HistoryItem>()
-        if (cursor.moveToFirst()) {
-            do {
-                val id = cursor.getInt(cursor.getColumnIndexOrThrow(COLUMN_ID))
-                val type = cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_TYPE))
-                val content = cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_CONTENT))
-                val timestamp = cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_TIMESTAMP))
-                historyList.add(HistoryItem(id, type, content, timestamp))
-            } while (cursor.moveToNext())
-        }
-        cursor.close()
-        db.close()
-        return historyList
-    }
-
-    // Method to delete a specific history entry
-    fun deleteHistory(id: Int) {
-        val db = writableDatabase
-        db.execSQL("DELETE FROM $TABLE_NAME WHERE $COLUMN_ID = ?", arrayOf(id))
-        db.close()
-    }
-
-    // Method to clear all history
-    fun clearAllHistory() {
-        val db = writableDatabase
-        db.execSQL("DELETE FROM $TABLE_NAME")
-        db.close()
     }
 }

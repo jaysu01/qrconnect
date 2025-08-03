@@ -1,12 +1,14 @@
 # Gradle files
 .gradle/
 build/
+out/
 
 # Local configuration file (sdk path, etc)
 local.properties
 
 # Log/OS Files
 *.log
+*.tmp
 
 # Android Studio generated files and folders
 captures/
@@ -14,16 +16,18 @@ captures/
 .cxx/
 *.aab
 *.apk
+*.ap_
+*.dex
 output-metadata.json
 
-# IntelliJ
+# IntelliJ/Android Studio
 *.iml
 .idea/
 misc.xml
 deploymentTargetDropDown.xml
 render.experimental.xml
 
-# Keystore files
+# Keystore files (IMPORTANT: Keep these secret!)
 *.jks
 *.keystore
 
@@ -33,18 +37,34 @@ google-services.json
 # Android Profiling
 *.hprof
 
-# Additional entries from remote .gitignore
-*.iml
-.gradle
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+# Room Database files (since you're using Room)
+*.db
+*.db-shm
+*.db-wal
+
+# Kotlin/KSP generated files
+generated/
+.kotlin/
+
+# Cache directories
+.cache/
+cache/
+
+# OS generated files
 .DS_Store
-/build
-/captures
-.externalNativeBuild
-.cxx
-local.properties
+Thumbs.db
+*~
+
+# Backup files
+*.bak
+*.swp
+*.swo
+
+# ProGuard/R8
+mapping.txt
+seeds.txt
+usage.txt
+
+# Lint
+lint-report.*
+lint-results.*
